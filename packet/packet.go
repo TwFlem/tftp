@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,7 +13,9 @@ const (
 )
 
 var (
-	ErrInvalidOp = errors.New("invalid_op")
+	errInvalidOp       = errors.New("invalid_op")
+	errInvalidMode     = errors.New("invalid_mode")
+	errMalformedPacket = errors.New("invalid_packet")
 )
 
 type Op int
@@ -43,29 +46,17 @@ func (o Op) String() string {
 	}
 }
 
-func OpFromBytes(buf []byte) (Op, error) {
-	if len(buf) < 2 {
-		return OpInvalid, fmt.Errorf("not enough bytes for an op code: %w", ErrInvalidOp)
+func OpFrom(packet []byte) (Op, error) {
+	if len(packet) < 2 {
+		return OpInvalid, fmt.Errorf("not enough bytes for an op code: %w", errInvalidOp)
 	}
 
-	if buf[0] != '0' {
-		return OpInvalid, fmt.Errorf("%b%b: %w", buf[0], buf[1], ErrInvalidOp)
+	op := binary.BigEndian.Uint16(packet[:2])
+	if !(1 <= op && op <= 5) {
+		return OpInvalid, fmt.Errorf("%d is not a valid op code: %w", op, errInvalidOp)
 	}
 
-	switch buf[1] {
-	case '1':
-		return OpRead, nil
-	case '2':
-		return OpWrite, nil
-	case '3':
-		return OpData, nil
-	case '4':
-		return OpAck, nil
-	case '5':
-		return OpError, nil
-	default:
-		return OpInvalid, fmt.Errorf("%b%b: %w", buf[0], buf[1], ErrInvalidOp)
-	}
+	return Op(op), nil
 }
 
 type Mode string
@@ -75,30 +66,53 @@ const (
 	ModeOctet    Mode = "octet"
 )
 
-type ReadRequest struct {
-	Mode     Mode
-	Filename string
-}
-
-type WriteRequest struct {
-	Mode     Mode
-	Filename string
-}
-
 // packet structure: op:2 - filename->0 - mode->0
-func (wr WriteRequest) Pack() []byte {
-	packet := make([]byte, opPacketByteSize+len(wr.Filename)+1+len(wr.Mode)+1)
+func FromWriteRequest(filename string, mode Mode) []byte {
+	packet := make([]byte, opPacketByteSize+len(filename)+1+len(mode)+1)
 
 	binary.BigEndian.PutUint16(packet, 2)
 	n := 2
 
-	n += copy(packet[2:], wr.Filename)
-	packet[n] = '0'
+	n += copy(packet[2:], filename)
+	packet[n] = 0
 	n++
 
-	n += copy(packet[n:], wr.Mode)
-	packet[n] = '0'
+	n += copy(packet[n:], mode)
+	packet[n] = 0
 	n++
 
 	return packet
+}
+
+// WRRequest read and write requests payloads excluding the op code
+type WRRequest struct {
+	Filename string
+	Mode     Mode
+}
+
+// packet structure: op:2 - filename->0 - mode->0
+// WRRequestFrom Extracts the fields from either the read or write request. Aside from the op code,
+// Read and Write requests contain the same data.
+func WRRequestFrom(packet []byte) (WRRequest, error) {
+	fields := bytes.Split(packet[2:], []byte{0})
+	if len(fields) < 2 {
+		return WRRequest{}, fmt.Errorf("missing filename or mode: %w", errMalformedPacket)
+	}
+	if len(fields[0]) < 1 {
+		return WRRequest{}, fmt.Errorf("missing or invalid filename: %w", errMalformedPacket)
+	}
+	if len(fields[1]) < 1 {
+		return WRRequest{}, fmt.Errorf("missing mode: %w", errMalformedPacket)
+	}
+
+	filename := string(fields[0])
+	mode := Mode(string(fields[1]))
+	if !(mode == ModeOctet || mode == ModeNetascii) {
+		return WRRequest{}, fmt.Errorf("invalid mode: %w", errMalformedPacket)
+	}
+
+	return WRRequest{
+		Mode:     mode,
+		Filename: filename,
+	}, nil
 }
