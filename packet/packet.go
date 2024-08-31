@@ -67,10 +67,10 @@ const (
 )
 
 // packet structure: op:2 - filename->0 - mode->0
-func FromWriteRequest(filename string, mode Mode) []byte {
+func FromRWRequest(op Op, filename string, mode Mode) []byte {
 	packet := make([]byte, opPacketByteSize+len(filename)+1+len(mode)+1)
 
-	binary.BigEndian.PutUint16(packet, 2)
+	binary.BigEndian.PutUint16(packet, uint16(op))
 	n := 2
 
 	n += copy(packet[2:], filename)
@@ -84,34 +84,34 @@ func FromWriteRequest(filename string, mode Mode) []byte {
 	return packet
 }
 
-// WRRequest read and write requests payloads excluding the op code
-type WRRequest struct {
+// RWRequest read and write requests payloads excluding the op code
+type RWRequest struct {
 	Filename string
 	Mode     Mode
 }
 
 // packet structure: op:2 - filename->0 - mode->0
-// WRRequestFrom Extracts the fields from either the read or write request. Aside from the op code,
+// RWRequestFrom Extracts the fields from either the read or write request. Aside from the op code,
 // Read and Write requests contain the same data.
-func WRRequestFrom(packet []byte) (WRRequest, error) {
+func RWRequestFrom(packet []byte) (RWRequest, error) {
 	fields := bytes.Split(packet[2:], []byte{0})
 	if len(fields) < 2 {
-		return WRRequest{}, fmt.Errorf("missing filename or mode: %w", errMalformedPacket)
+		return RWRequest{}, fmt.Errorf("missing filename or mode: %w", errMalformedPacket)
 	}
 	if len(fields[0]) < 1 {
-		return WRRequest{}, fmt.Errorf("missing or invalid filename: %w", errMalformedPacket)
+		return RWRequest{}, fmt.Errorf("missing or invalid filename: %w", errMalformedPacket)
 	}
 	if len(fields[1]) < 1 {
-		return WRRequest{}, fmt.Errorf("missing mode: %w", errMalformedPacket)
+		return RWRequest{}, fmt.Errorf("missing mode: %w", errMalformedPacket)
 	}
 
 	filename := string(fields[0])
 	mode := Mode(string(fields[1]))
 	if !(mode == ModeOctet || mode == ModeNetascii) {
-		return WRRequest{}, fmt.Errorf("invalid mode: %w", errMalformedPacket)
+		return RWRequest{}, fmt.Errorf("invalid mode: %w", errMalformedPacket)
 	}
 
-	return WRRequest{
+	return RWRequest{
 		Mode:     mode,
 		Filename: filename,
 	}, nil

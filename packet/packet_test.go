@@ -6,26 +6,27 @@ import (
 
 func TestRequest_Packing(t *testing.T) {
 	type testCase struct {
+		op       Op
 		filename string
 		mode     Mode
 	}
 
 	testCases := []testCase{
-		{"/some/kind/of/file/name", ModeOctet},
-		{"/", ModeOctet},
-		{"/other", ModeNetascii},
-		{"/0_0", ModeNetascii},
+		{OpWrite, "/some/kind/of/file/name", ModeOctet},
+		{OpRead, "/", ModeOctet},
+		{OpWrite, "/other", ModeNetascii},
+		{OpRead, "/0_0", ModeNetascii},
 	}
 	for _, tc := range testCases {
-		packet := FromWriteRequest(tc.filename, tc.mode)
+		packet := FromRWRequest(tc.op, tc.filename, tc.mode)
 		op, err := OpFrom(packet)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal("problem when getting op from packet: ", err)
 		}
-		if op != OpWrite {
+		if op != tc.op {
 			t.Fatal("expected write op but got ", op)
 		}
-		wr, err := WRRequestFrom(packet)
+		wr, err := RWRequestFrom(packet)
 		if err != nil {
 			t.Fatal(err)
 		}
