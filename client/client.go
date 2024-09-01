@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"time"
 )
@@ -26,7 +27,7 @@ func New(destination string) *Client {
 	}
 }
 
-func (s Client) Write(ctx context.Context, srcFilename string, dstFilename string) (int, error) {
+func (s Client) Write(ctx context.Context, dstFilename string, srcFilename string) (int, error) {
 	fp, err := os.Open(srcFilename)
 	if err != nil {
 		return 0, fmt.Errorf("problem opening file %s: %w", srcFilename, err)
@@ -35,6 +36,21 @@ func (s Client) Write(ctx context.Context, srcFilename string, dstFilename strin
 
 	r := bufio.NewReader(fp)
 	packet := make([]byte, fixedPacketSize)
+
+	dstAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:6969")
+	if err != nil {
+		return 0, fmt.Errorf("problem resolving UDP address: %w", err)
+	}
+	conn, err := net.DialUDP("udp", nil, dstAddr)
+	if err != nil {
+		return 0, fmt.Errorf("problem dialing UDP address: %w", err)
+	}
+	defer conn.Close()
+
+	_, err = conn.Write([]byte("this is a udp message"))
+	if err != nil {
+		return 0, fmt.Errorf("problem making write UDP request: %w", err)
+	}
 
 	sizeTransfered := 0
 	for {

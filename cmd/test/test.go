@@ -13,10 +13,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(ctx, os.Kill, os.Interrupt)
 	defer cancel()
 
-	c := client.New("todo")
-	bytesWritten, err := c.Write(ctx, "data/lorem.txt", "todo")
+	c := client.New("127.0.0.1:6969")
+	n, err := c.Write(ctx, "tmp/lorem.txt", "data/lorem.txt")
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("finished reading %d bytes from %s\n", bytesWritten, "data/lorem.txt")
+	fmt.Println("wrote n bytes", n)
 }

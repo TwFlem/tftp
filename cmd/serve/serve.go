@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"tftp/client"
+	"tftp/server"
 )
 
 func main() {
@@ -13,10 +13,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(ctx, os.Kill, os.Interrupt)
 	defer cancel()
 
-	c := client.New("todo")
-	bytesWritten, err := c.Write(ctx, "data/lorem.txt", "todo")
+	s := server.New()
+	err := s.StartAndListen(ctx)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("finished reading %d bytes from %s\n", bytesWritten, "data/lorem.txt")
 }
