@@ -14,7 +14,7 @@ func main() {
 	defer cancel()
 
 	c := client.New("127.0.0.1:6969")
-	n, err := c.Write(ctx, "tmp/lorem.txt", "data/lorem.txt")
+	n, err := c.Read(ctx, "data/lorem.txt")
 	if err != nil {
 		fmt.Println(err)
 	}

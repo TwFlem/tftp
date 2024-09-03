@@ -159,6 +159,7 @@ func DataFrom(packet []byte) ([]byte, error) {
 	return packet[4:], nil
 }
 
+// TODO: see what happens if we make this 0 allocation
 // data packet structure: op:2 - block:2 - data:tsize
 func NewData(block int, data []byte) []byte {
 	packet := make([]byte, 2+2+len(data))
