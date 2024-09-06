@@ -151,12 +151,33 @@ func BlockFrom(packet []byte) (int, error) {
 	return int(binary.BigEndian.Uint16(packet[2:4])), nil
 }
 
+// payload of the data packet with the op code and the rest of the packet stripped away
+// other than the block and data
+type Data struct {
+	// block number corresponding to the chunk of data from the payload starting count at 1
+	Block int
+	// actual data of the payload corresponding to the transfer size of the original read or write request
+	Payload []byte
+}
+
 // data packet structure: op:2 - block:2 - data:tsize
-func DataFrom(packet []byte) ([]byte, error) {
+func DataFrom(packet []byte) (Data, error) {
 	if len(packet) < 4 {
-		return nil, Error{0, "missing_data"}
+		return Data{}, Error{0, "missing_data"}
 	}
-	return packet[4:], nil
+	op, err := OpFrom(packet)
+	if err != nil {
+		return Data{}, err
+	}
+	if op != OpData {
+		return Data{}, ErrInvalidOperation
+	}
+	block := int(binary.BigEndian.Uint16(packet[2:4]))
+	data := packet[4:]
+	return Data{
+		Block:   block,
+		Payload: data,
+	}, nil
 }
 
 // TODO: see what happens if we make this 0 allocation

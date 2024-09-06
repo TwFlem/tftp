@@ -61,22 +61,21 @@ func TestData(t *testing.T) {
 		if op != OpData {
 			t.Fatal("expected data op but got ", op)
 		}
-		block, err := BlockFrom(packet)
-		if err != nil {
-			t.Fatal("problem when getting block from packet:", err)
-		}
-		if block != tc.block {
-			t.Fatalf("block: expected=%d actual=%d", tc.block, block)
-		}
 		data, err := DataFrom(packet)
 		if err != nil {
 			t.Fatal("problem when getting data from packet:", err)
 		}
-		if len(data) != len(tc.data) {
+		if err != nil {
+			t.Fatal("problem when getting block from packet:", err)
+		}
+		if data.Block != tc.block {
+			t.Fatalf("block: expected=%d actual=%d", tc.block, data.Block)
+		}
+		if len(data.Payload) != len(tc.data) {
 			t.Fatalf("data: expected=%v actual=%v", tc.data, data)
 		}
-		for i := range data {
-			if data[i] != tc.data[i] {
+		for i := range data.Payload {
+			if data.Payload[i] != tc.data[i] {
 				t.Fatalf("data: expected=%v actual=%v", tc.data, data)
 			}
 		}
