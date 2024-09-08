@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -117,8 +118,12 @@ func handleRead(peerAddr *net.UDPAddr, req packet.RWRequest) error {
 
 	dataBuf := make([]byte, 512)
 	ackBuf := make([]byte, 4)
-	block := 0
+	currTransmitBlock := 0
 	quit := false
+	retransmitInterval := time.Millisecond * 500
+	timeout := time.Second * 5
+	maxRetransmitAttempts := int(timeout / retransmitInterval)
+
 	for {
 		n, err := io.ReadFull(fp, dataBuf)
 		if err == io.ErrUnexpectedEOF || err == io.EOF {
@@ -127,35 +132,45 @@ func handleRead(peerAddr *net.UDPAddr, req packet.RWRequest) error {
 			return fmt.Errorf("problem while reading file during transfer: %w", err)
 		}
 
-		block++
-		dataOut := packet.NewData(block, dataBuf[:n])
-		n, err = conn.WriteToUDP(dataOut, peerAddr)
-		if err != nil {
-			return fmt.Errorf("problem while writing block=%d during transfer: %w", block, err)
-		}
+		currTransmitBlock++
+		dataOut := packet.NewData(currTransmitBlock, dataBuf[:n])
 
-		err = conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-		if err != nil {
-			return fmt.Errorf("problem setting read deadline for block=%d: %w", block, err)
-		}
-		n, err = conn.Read(ackBuf)
-		if err != nil {
-			return fmt.Errorf("problem waiting for ack of block=%d during transfer: %w", block, err)
-		}
+		var retransmitAttempts int
+		var lastAckBlock int
+		for ; lastAckBlock != currTransmitBlock && retransmitAttempts < maxRetransmitAttempts; retransmitAttempts++ {
+			n, err = conn.WriteToUDP(dataOut, peerAddr)
+			if err != nil {
+				return fmt.Errorf("problem while writing block=%d during transfer: %w", currTransmitBlock, err)
+			}
 
-		op, err := packet.OpFrom(ackBuf)
-		if err != nil {
-			return fmt.Errorf("problem getting ack op of block=%d during during transfer: %w", block, err)
-		}
+			err = conn.SetReadDeadline(time.Now().Add(retransmitInterval))
+			if err != nil {
+				return fmt.Errorf("problem setting read deadline for retransmit internval of block=%d: %w", currTransmitBlock, err)
+			}
+			n, err = conn.Read(ackBuf)
+			if err != nil {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					continue
+				}
+				return fmt.Errorf("problem waiting for ack of block=%d during transfer: %w", currTransmitBlock, err)
+			}
 
-		if op != packet.OpAck {
-			return fmt.Errorf("peer did not send back correct op during transfer for block=%d", block, err)
+			lastAckBlock, err = packet.BlockFromAck(ackBuf)
+			if err != nil {
+				return fmt.Errorf("problem getting ack during transfer: %w", err)
+			}
 		}
 
 		if quit {
+			if retransmitAttempts >= maxRetransmitAttempts {
+				fmt.Println("reached max retransmit attempts on last data packet, continuing assuming client received everything")
+			}
 			break
 		}
 
+		if retransmitAttempts >= maxRetransmitAttempts {
+			return fmt.Errorf("max retransmit attempts reached for block=%d before EOF: %w", currTransmitBlock, err)
+		}
 	}
 
 	return nil

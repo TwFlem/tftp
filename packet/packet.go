@@ -151,6 +151,22 @@ func BlockFrom(packet []byte) (int, error) {
 	return int(binary.BigEndian.Uint16(packet[2:4])), nil
 }
 
+// ack packet structure: op:2 - block:2
+func BlockFromAck(packet []byte) (int, error) {
+	if len(packet) < 4 {
+		return 0, Error{0, "missing_block_number"}
+	}
+	op, err := OpFrom(packet)
+	if err != nil {
+		return 0, err
+	}
+	if op != OpAck {
+		return 0, fmt.Errorf("expected op code %d for %s but got %d for %s", OpAck, OpAck, op, op)
+	}
+
+	return int(binary.BigEndian.Uint16(packet[2:4])), nil
+}
+
 // payload of the data packet with the op code and the rest of the packet stripped away
 // other than the block and data
 type Data struct {
@@ -218,6 +234,10 @@ func (e Error) String() string {
 
 func (e Error) Error() string {
 	return e.String()
+}
+
+func (e Error) TftpCode() int {
+	return e.Code
 }
 
 // error packet structure: op:2 - error_code:2 - message->0

@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -91,23 +92,60 @@ func (s Client) Read(ctx context.Context, dstFilename string) (int, error) {
 		return 0, fmt.Errorf("problem writing read request to server: %w", err)
 	}
 
-	dataTransferredBytes := 0
-	blockTransferSize := 512
-	// op+block+tsize
-	tftpDataPacketSize := 2 + 2 + blockTransferSize
-	dataPacketBuf := make([]byte, tftpDataPacketSize)
-	lastestBlock := 0
-	debug := []byte{}
-	lastestPayloadSize := blockTransferSize
+	var serverAddr *net.UDPAddr
+	var n int
 
-	err = conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+	timeout := time.Second * 5
+	blockTransferSize := 512
+	tftpDataPacketSize := 2 + 2 + blockTransferSize
+	dataTransferredBytes := 0
+	dataPacketBuf := make([]byte, tftpDataPacketSize)
+
+	err = conn.SetReadDeadline(time.Now().Add(timeout))
 	if err != nil {
 		return 0, fmt.Errorf("problem setting deadline read transfer: %w", err)
 	}
 
-	for lastestPayloadSize >= blockTransferSize {
-		n, serverAddr, err := conn.ReadFromUDP(dataPacketBuf)
+	n, serverAddr, err = conn.ReadFromUDP(dataPacketBuf)
+	if err != nil {
+		return 0, fmt.Errorf("problem reading data from data response: %w", err)
+	}
+
+	data, err := packet.DataFrom(dataPacketBuf[:n])
+	if err != nil {
+		return 0, fmt.Errorf("problem marshaling data: %w", err)
+	}
+
+	if data.Block != 1 {
+		return 0, fmt.Errorf("server did not start with first block: %w", err)
+	}
+
+	dataTransferredBytes += len(data.Payload)
+	currDataSize := len(data.Payload)
+	lastBlock := data.Block
+	retransmitInterval := time.Millisecond * 500
+
+	// TODO: figure out how better allow callers to consume this data and then remove.
+	debug := []byte{}
+
+	var retransmitAttempts int
+	var maxRetransmitAttempts = int(timeout / retransmitInterval)
+	for ; currDataSize == blockTransferSize && retransmitAttempts < maxRetransmitAttempts; retransmitAttempts++ {
+		ack := packet.NewAck(lastBlock)
+		_, err = conn.WriteToUDP(ack, serverAddr)
 		if err != nil {
+			return 0, fmt.Errorf("problem acking data from data response for block=%d: %w", data.Block, err)
+		}
+
+		err = conn.SetReadDeadline(time.Now().Add(retransmitInterval))
+		if err != nil {
+			return 0, fmt.Errorf("problem setting deadline read transfer: %w", err)
+		}
+		n, serverAddr, err = conn.ReadFromUDP(dataPacketBuf)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			}
 			return 0, fmt.Errorf("problem reading data from data response: %w", err)
 		}
 
@@ -116,35 +154,32 @@ func (s Client) Read(ctx context.Context, dstFilename string) (int, error) {
 			return dataTransferredBytes, fmt.Errorf("problem marshaling data: %w", err)
 		}
 
-		ack := packet.NewAck(data.Block)
-		_, err = conn.WriteToUDP(ack, serverAddr)
-		if err != nil {
-			return 0, fmt.Errorf("problem acking data from data response for block=%d: %w", data.Block, err)
-		}
-
-		if data.Block == lastestBlock {
+		if data.Block != lastBlock+1 {
 			continue
 		}
+		retransmitAttempts = 0
 
-		lastestBlock = data.Block
+		lastBlock = data.Block
 		dataTransferredBytes += len(data.Payload)
-		// TODO: figure out how to allow something to consume this
+		currDataSize = len(data.Payload)
 		debug = append(debug, data.Payload...)
-		lastestPayloadSize = len(data.Payload)
 
-		// We need to time out eventually if we're pinging the same data back and forth
-		err = conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-		if err != nil {
-			return 0, fmt.Errorf("problem setting deadline read transfer: %w", err)
-		}
 	}
 
-	if lastestPayloadSize > blockTransferSize {
-		return 0, fmt.Errorf("critical: somehow a payload size was larget than the agreed upon transfer size")
+	if currDataSize > blockTransferSize {
+		return 0, fmt.Errorf("critical: somehow a payload size was larger than the agreed upon transfer size")
 	}
+
+	if retransmitAttempts >= maxRetransmitAttempts {
+		return dataTransferredBytes, fmt.Errorf("max retransmit attempts reached: expectedBlock=%d lastReceivedBlock=%d %w", lastBlock+1, data.Block, err)
+	}
+
+	// This is a courtesy. At this point, the client got what it needed. We will not dally around to make sure the serving host received the final ack.
+	ack := packet.NewAck(lastBlock)
+	_, err = conn.WriteToUDP(ack, serverAddr)
 
 	fmt.Println("bytes transferred", dataTransferredBytes)
-	fmt.Println("last block", lastestBlock)
+	fmt.Println("last block", lastBlock)
 	fmt.Println("data", string(debug))
 
 	return 0, nil
