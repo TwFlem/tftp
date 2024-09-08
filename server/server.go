@@ -119,15 +119,15 @@ func handleRead(peerAddr *net.UDPAddr, req packet.RWRequest) error {
 	dataBuf := make([]byte, 512)
 	ackBuf := make([]byte, 4)
 	currTransmitBlock := 0
-	quit := false
 	retransmitInterval := time.Millisecond * 500
 	timeout := time.Second * 5
 	maxRetransmitAttempts := int(timeout / retransmitInterval)
 
-	for {
+	reachedEOF := false
+	for !reachedEOF {
 		n, err := io.ReadFull(fp, dataBuf)
 		if err == io.ErrUnexpectedEOF || err == io.EOF {
-			quit = true
+			reachedEOF = true
 		} else if err != nil {
 			return fmt.Errorf("problem while reading file during transfer: %w", err)
 		}
@@ -161,14 +161,11 @@ func handleRead(peerAddr *net.UDPAddr, req packet.RWRequest) error {
 			}
 		}
 
-		if quit {
-			if retransmitAttempts >= maxRetransmitAttempts {
-				fmt.Println("reached max retransmit attempts on last data packet, continuing assuming client received everything")
-			}
-			break
-		}
-
 		if retransmitAttempts >= maxRetransmitAttempts {
+			if reachedEOF {
+				fmt.Println("reached max retransmit attempts on last data packet, continuing assuming client received everything")
+				break
+			}
 			return fmt.Errorf("max retransmit attempts reached for block=%d before EOF: %w", currTransmitBlock, err)
 		}
 	}
